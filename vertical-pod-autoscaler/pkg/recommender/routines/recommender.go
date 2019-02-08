@@ -107,6 +107,7 @@ func (r *recommender) UpdateVPAs() {
 			}
 		}
 		cnt.Add(vpa)
+		metrics_recommender.ObserveVPARecommendation(vpa)
 
 		_, err := vpa_utils.UpdateVpaStatusIfNeeded(
 			r.vpaClient.VerticalPodAutoscalers(vpa.ID.Namespace), vpa, &observedVpa.Status)

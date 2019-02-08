@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/apimachinery/pkg/api/resource"
 	vpa_types "k8s.io/autoscaler/vertical-pod-autoscaler/pkg/apis/autoscaling.k8s.io/v1beta1"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/recommender/model"
 	"k8s.io/autoscaler/vertical-pod-autoscaler/pkg/utils/metrics"
@@ -36,6 +37,14 @@ var (
 )
 
 var (
+	vpaContainerRecommendations = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: metricsNamespace,
+			Name:      "vpa_recommendation",
+			Help:      "Recommendation from the VPA",
+		}, []string{"vpa_name", "namespace", "pod_selector", "container", "recommendation_type", "resource_name"},
+	)
+
 	vpaObjectCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
@@ -69,6 +78,7 @@ type ObjectCounter struct {
 
 // Register initializes all metrics for VPA Recommender
 func Register() {
+	prometheus.MustRegister(vpaContainerRecommendations)
 	prometheus.MustRegister(vpaObjectCount)
 	prometheus.MustRegister(recommendationLatency)
 	prometheus.MustRegister(functionLatency)
@@ -82,6 +92,25 @@ func NewExecutionTimer() *metrics.ExecutionTimer {
 // ObserveRecommendationLatency observes the time it took for the first recommendation to appear
 func ObserveRecommendationLatency(created time.Time) {
 	recommendationLatency.Observe(time.Now().Sub(created).Seconds())
+}
+
+func toFloat64(q *resource.Quantity) float64 {
+	v := q.Value()
+	if v > 10000000 {
+		return float64(v)
+	}
+	return float64(q.MilliValue()) * 0.001
+}
+
+func ObserveVPARecommendation(vpa *model.Vpa) {
+	for _, r := range vpa.Recommendation.ContainerRecommendations {
+		vpaContainerRecommendations.WithLabelValues(vpa.ID.VpaName, vpa.ID.Namespace, vpa.PodSelector.String(), r.ContainerName, "lower_bound", "cpu").Set(toFloat64(r.LowerBound.Cpu()))
+		vpaContainerRecommendations.WithLabelValues(vpa.ID.VpaName, vpa.ID.Namespace, vpa.PodSelector.String(), r.ContainerName, "lower_bound", "memory").Set(toFloat64(r.LowerBound.Memory()))
+		vpaContainerRecommendations.WithLabelValues(vpa.ID.VpaName, vpa.ID.Namespace, vpa.PodSelector.String(), r.ContainerName, "target", "cpu").Set(toFloat64(r.Target.Cpu()))
+		vpaContainerRecommendations.WithLabelValues(vpa.ID.VpaName, vpa.ID.Namespace, vpa.PodSelector.String(), r.ContainerName, "target", "memory").Set(toFloat64(r.Target.Memory()))
+		vpaContainerRecommendations.WithLabelValues(vpa.ID.VpaName, vpa.ID.Namespace, vpa.PodSelector.String(), r.ContainerName, "upper_bound", "cpu").Set(toFloat64(r.UpperBound.Cpu()))
+		vpaContainerRecommendations.WithLabelValues(vpa.ID.VpaName, vpa.ID.Namespace, vpa.PodSelector.String(), r.ContainerName, "upper_bound", "memory").Set(toFloat64(r.UpperBound.Memory()))
+	}
 }
 
 // NewObjectCounter creates a new helper to split VPA objects into buckets
